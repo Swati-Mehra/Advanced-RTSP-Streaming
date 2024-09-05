@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>RTSP Stream Input</title>
+</head>
+
+<body>
+	<h1>RTSP Stream Input</h1>
+	<form id="streamForm">
+		<label for="streamType">Choose Stream Type:</label>
+		<select id="streamType" name="streamType" required>
+			<option value="local">Local File</option>
+			<option value="rtsp">RTSP URL</option>
+		</select>
+
+		<div id="rtspInput" style="display:none;">
+			<label for="rtspUrl">Enter RTSP URL:</label>
+			<input type="text" id="rtspUrl" name="rtspUrl">
+		</div>
+
+		<button type="submit">Submit</button>
+	</form>
+
+	<p id="responseMessage"></p>
+
+	<h2>Video Stream:</h2>
+	<video id="videoPlayer" controls width="640" height="360"></video>
+
+	<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+	<script>
+		const socket = new WebSocket('ws://localhost:8080/live-stream');
+
+		socket.onopen = function () {
+			console.log('WebSocket connection established');
+		};
+
+		socket.onerror = function (error) {
+			console.error('WebSocket error: ' + error.message);
+			document.getElementById('responseMessage').textContent = 'WebSocket connection error';
+		};
+
+		socket.onmessage = function (event) {
+			console.log('Received WebSocket message:', event.data);
+			try {
+				const message = JSON.parse(event.data);
+				document.getElementById('responseMessage').textContent = message.status || 'No status found';
+
+				if (message.status.toLowerCase().includes('completed') || message.status.toLowerCase().includes('streaming')) {
+					// HLS.js setup integrated here
+					const video = document.getElementById('videoPlayer');
+					if (Hls.isSupported()) {
+						const hls = new Hls();
+						hls.loadSource('http://localhost:8080/hls/stream.m3u8');
+						hls.attachMedia(video);
+						hls.on(Hls.Events.MANIFEST_PARSED, function () {
+							video.play().catch(error => console.error('Error playing video:', error));
+						});
+					} else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+						video.src = 'http://localhost:8080/hls/stream.m3u8';
+						video.addEventListener('loadedmetadata', function () {
+							video.play().catch(error => console.error('Error playing video:', error));
+						});
+					} else {
+						document.getElementById('responseMessage').textContent = 'HLS.js or native HLS is not supported';
+					}
+				}
+			} catch (e) {
+				console.error('Failed to parse JSON:', e);
+			}
+		};
+
+		document.getElementById('streamType').addEventListener('change', function (event) {
+			const rtspInput = document.getElementById('rtspInput');
+			rtspInput.style.display = (event.target.value === 'rtsp') ? 'block' : 'none';
+		});
+
+		document.getElementById('streamForm').addEventListener('submit', function (event) {
+			event.preventDefault();
+
+			const streamType = document.getElementById('streamType').value;
+			let message;
+
+			if (streamType === 'local') {
+				message = `start:local`;
+				console.log('Selected local stream:', message);
+			} else if (streamType === 'rtsp') {
+				const rtspUrl = document.getElementById('rtspUrl').value;
+				message = `start:rtsp:${rtspUrl}`;
+				console.log('Selected RTSP stream:', message);
+			}
+
+			if (socket.readyState === WebSocket.OPEN) {
+				socket.send(message);
+				console.log('Message sent:', message);
+			} else {
+				document.getElementById('responseMessage').textContent = 'WebSocket connection not established';
+			}
+		});
+	</script>
+
+</body>
+
+</html>
